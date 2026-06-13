@@ -1,0 +1,64 @@
+---
+- name: Create AWX namespace
+  kubernetes.core.k8s:
+    api_version: v1
+    kind: Namespace
+    name: "{{ awx_namespace }}"
+    state: present
+    kubeconfig: "{{ kubeconfig }}"
+
+- name: Render kustomization for AWX Operator
+  ansible.builtin.template:
+    src: kustomization.yaml.j2
+    dest: "{{ awx_install_dir }}/kustomization.yaml"
+    mode: "0644"
+
+- name: Apply AWX Operator via kustomize
+  kubernetes.core.k8s:
+    definition: "{{ lookup('kubernetes.core.kustomize', dir=awx_install_dir) }}"
+    state: present
+    kubeconfig: "{{ kubeconfig }}"
+
+- name: Wait for AWX Operator to be ready
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ awx_namespace }}"
+    label_selectors:
+      - control-plane=controller-manager
+    kubeconfig: "{{ kubeconfig }}"
+  register: operator_pods
+  until:
+    - operator_pods.resources | length > 0
+    - operator_pods.resources[0].status.phase == "Running"
+  retries: 24
+  delay: 10
+
+- name: Create AWX secret (admin + postgres passwords)
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: "{{ kubeconfig }}"
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ awx_secret_name }}"
+        namespace: "{{ awx_namespace }}"
+      type: Opaque
+      stringData:
+        admin_password: "{{ awx_admin_password }}"
+        postgres_password: "{{ awx_postgres_password }}"
+  no_log: true
+
+- name: Deploy AWX custom resource
+  kubernetes.core.k8s:
+    definition: "{{ lookup('template', 'awx-cr.yaml.j2') | from_yaml }}"
+    state: present
+    kubeconfig: "{{ kubeconfig }}"
+
+- name: Show post-install info
+  ansible.builtin.debug:
+    msg:
+      - "AWX deployment started. Watch: kubectl get pods -n {{ awx_namespace }} -w"
+      - "URL:   http://<host-ip>:{{ awx_nodeport }}"
+      - "Login: {{ awx_admin_user }}"
+      - "Password: (value from AWX_ADMIN_PASSWORD in .env)"

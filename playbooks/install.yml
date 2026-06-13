@@ -1,0 +1,37 @@
+---
+- name: Deploy AWX on k3s
+  hosts: awx
+  gather_facts: true
+
+  vars:
+    kubeconfig: "{{ ansible_env.HOME }}/.kube/config"
+    awx_install_dir: "{{ ansible_env.HOME }}/awx-install"
+
+    k3s_version: "{{ lookup('env', 'K3S_VERSION') | default('stable', true) }}"
+    awx_namespace: "{{ lookup('env', 'AWX_NAMESPACE') | default('awx', true) }}"
+    awx_operator_version: "{{ lookup('env', 'AWX_OPERATOR_VERSION') | default('2.19.1', true) }}"
+    awx_nodeport: "{{ lookup('env', 'AWX_NODEPORT') | default('30080', true) }}"
+    awx_admin_user: "{{ lookup('env', 'AWX_ADMIN_USER') | default('admin', true) }}"
+    awx_admin_password: "{{ lookup('env', 'AWX_ADMIN_PASSWORD') }}"
+    awx_postgres_password: "{{ lookup('env', 'AWX_POSTGRES_PASSWORD') }}"
+
+  pre_tasks:
+    - name: Validate required secrets are set
+      ansible.builtin.assert:
+        that:
+          - awx_admin_password | length > 0
+          - awx_postgres_password | length > 0
+        fail_msg: >
+          AWX_ADMIN_PASSWORD and AWX_POSTGRES_PASSWORD must be set.
+          Copy env.example to .env, edit it, then run:
+          set -a && source .env && set +a
+
+    - name: Ensure AWX install dir exists
+      ansible.builtin.file:
+        path: "{{ awx_install_dir }}"
+        state: directory
+        mode: "0755"
+
+  roles:
+    - role: k3s
+    - role: awx

@@ -1,0 +1,7 @@
+---
+awx_namespace: awx
+awx_operator_version: "2.19.1"
+awx_nodeport: 30080
+awx_admin_user: admin
+awx_instance_name: awx
+awx_secret_name: awx-secret

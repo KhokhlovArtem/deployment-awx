@@ -1,0 +1,27 @@
+---
+- name: Uninstall AWX
+  hosts: awx
+  gather_facts: true
+
+  vars:
+    kubeconfig: "{{ ansible_env.HOME }}/.kube/config"
+    awx_namespace: "{{ lookup('env', 'AWX_NAMESPACE') | default('awx', true) }}"
+    awx_instance_name: awx
+
+  tasks:
+    - name: Delete AWX custom resource
+      kubernetes.core.k8s:
+        api_version: awx.ansible.com/v1beta1
+        kind: AWX
+        name: "{{ awx_instance_name }}"
+        namespace: "{{ awx_namespace }}"
+        state: absent
+        kubeconfig: "{{ kubeconfig }}"
+
+    - name: Delete AWX namespace
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Namespace
+        name: "{{ awx_namespace }}"
+        state: absent
+        kubeconfig: "{{ kubeconfig }}"

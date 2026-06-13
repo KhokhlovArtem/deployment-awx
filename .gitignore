@@ -1,0 +1,17 @@
+# Secrets / local env
+.env
+*.env.local
+
+# Ansible
+*.retry
+.vault_pass
+
+# Kubeconfig copies
+kubeconfig
+*.kubeconfig
+k3s.yaml
+
+# Python venv
+ansible-venv/
+.venv/
+__pycache__/

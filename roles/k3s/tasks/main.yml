@@ -1,0 +1,41 @@
+---
+- name: Check if k3s is already installed
+  ansible.builtin.command: which kubectl
+  register: kubectl_check
+  changed_when: false
+  failed_when: false
+
+- name: Install k3s
+  ansible.builtin.shell: >
+    curl -sfL https://get.k3s.io |
+    INSTALL_K3S_CHANNEL={{ k3s_version }}
+    sh -s - --write-kubeconfig-mode 644
+  args:
+    creates: /usr/local/bin/k3s
+  become: true
+  when: kubectl_check.rc != 0
+
+- name: Ensure ~/.kube directory exists
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    mode: "0755"
+
+- name: Copy k3s kubeconfig to user home
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_user_id }}"
+    mode: "0600"
+  become: true
+
+- name: Wait for node to be Ready
+  ansible.builtin.command: kubectl wait --for=condition=Ready node --all --timeout=120s
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  register: node_ready
+  changed_when: false
+  retries: 6
+  delay: 10
+  until: node_ready.rc == 0
