@@ -43,3 +43,9 @@ To leave the virtualenv when finished:
 ```bash
 deactivate
 ```
+
+## Note: Python interpreter for k8s modules
+The `kubernetes.core.*` modules run with the **target host interpreter**, not the
+venv that runs Ansible. The playbook pins it to `~/ansible-venv/bin/python3`
+(via `ansible_python_interpreter` in `playbooks/install.yml`), so `kubernetes`
+and `PyYAML` must be installed in that venv — `scripts/bootstrap.sh` does this.

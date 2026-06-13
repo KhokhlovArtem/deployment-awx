@@ -4,6 +4,7 @@
   gather_facts: true
 
   vars:
+    ansible_python_interpreter: "{{ lookup('env', 'HOME') }}/ansible-venv/bin/python3"
     kubeconfig: "{{ ansible_env.HOME }}/.kube/config"
     awx_install_dir: "{{ ansible_env.HOME }}/awx-install"
 
@@ -16,6 +17,19 @@
     awx_postgres_password: "{{ lookup('env', 'AWX_POSTGRES_PASSWORD') }}"
 
   pre_tasks:
+    - name: Verify kubernetes Python library is available
+      block:
+        - name: Import kubernetes module with the venv interpreter
+          ansible.builtin.command: "{{ ansible_python_interpreter }} -c 'import kubernetes'"
+          changed_when: false
+      rescue:
+        - name: Fail with install hint
+          ansible.builtin.fail:
+            msg: >
+              The 'kubernetes' Python library is missing for interpreter
+              {{ ansible_python_interpreter }}. Run scripts/bootstrap.sh, then
+              'source ~/ansible-venv/bin/activate' before re-running this playbook.
+
     - name: Validate required secrets are set
       ansible.builtin.assert:
         that:

@@ -69,6 +69,10 @@ All settings come from environment variables (see `env.example`):
 
 > `.env` is gitignored. Never commit real passwords.
 
+> The `kubernetes.core.*` modules use the interpreter at `~/ansible-venv/bin/python3`
+> (pinned via `ansible_python_interpreter`). Keep `kubernetes` + `PyYAML` in that venv
+> (installed by `scripts/bootstrap.sh`).
+
 ## Update
 Change values in `.env`, re-source it, and re-run `playbooks/install.yml` (idempotent).
 
