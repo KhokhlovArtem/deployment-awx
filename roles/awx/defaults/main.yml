@@ -5,3 +5,5 @@ awx_nodeport: 30080
 awx_admin_user: admin
 awx_instance_name: awx
 awx_secret_name: awx-secret
+kube_rbac_proxy_image: quay.io/brancz/kube-rbac-proxy
+kube_rbac_proxy_version: "v0.15.0"
