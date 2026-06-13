@@ -4,6 +4,7 @@
   gather_facts: true
 
   vars:
+    ansible_python_interpreter: "{{ lookup('env', 'HOME') }}/ansible-venv/bin/python3"
     kubeconfig: "{{ ansible_env.HOME }}/.kube/config"
     awx_namespace: "{{ lookup('env', 'AWX_NAMESPACE') | default('awx', true) }}"
     awx_instance_name: awx

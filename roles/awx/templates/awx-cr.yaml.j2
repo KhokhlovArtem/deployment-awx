@@ -7,5 +7,5 @@ spec:
   service_type: nodeport
   nodeport_port: {{ awx_nodeport }}
   admin_user: {{ awx_admin_user }}
-  admin_password_secret: {{ awx_secret_name }}
-  postgres_configuration_secret: {{ awx_secret_name }}
+  admin_password_secret: {{ awx_admin_secret_name }}
+  postgres_configuration_secret: {{ awx_postgres_secret_name }}

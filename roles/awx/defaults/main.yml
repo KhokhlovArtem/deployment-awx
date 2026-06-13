@@ -4,6 +4,15 @@ awx_operator_version: "2.19.1"
 awx_nodeport: 30080
 awx_admin_user: admin
 awx_instance_name: awx
-awx_secret_name: awx-secret
+
+awx_admin_secret_name: awx-admin-secret
+awx_postgres_secret_name: awx-postgres-configuration
+
+awx_postgres_host: awx-postgres-13
+awx_postgres_port: 5432
+awx_postgres_database: awx
+awx_postgres_username: awx
+awx_postgres_sslmode: prefer
+awx_postgres_type: managed
 kube_rbac_proxy_image: quay.io/brancz/kube-rbac-proxy
 kube_rbac_proxy_version: "v0.15.0"
