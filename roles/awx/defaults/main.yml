@@ -8,7 +8,7 @@ awx_instance_name: awx
 awx_admin_secret_name: awx-admin-secret
 awx_postgres_secret_name: awx-postgres-configuration
 
-awx_postgres_host: awx-postgres-13
+awx_postgres_host: awx-postgres-15
 awx_postgres_port: 5432
 awx_postgres_database: awx
 awx_postgres_username: awx

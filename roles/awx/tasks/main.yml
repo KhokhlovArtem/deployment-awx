@@ -61,7 +61,7 @@
       type: Opaque
       stringData:
         host: "{{ awx_postgres_host }}"
-        port: "{{ awx_postgres_port }}"
+        port: "{{ awx_postgres_port | string }}"
         database: "{{ awx_postgres_database }}"
         username: "{{ awx_postgres_username }}"
         password: "{{ awx_postgres_password }}"
