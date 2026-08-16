@@ -20,18 +20,17 @@
     kubeconfig: "{{ kubeconfig }}"
 
 - name: Wait for AWX Operator to be ready
-  kubernetes.core.k8s_info:
-    kind: Pod
-    namespace: "{{ awx_namespace }}"
-    label_selectors:
-      - control-plane=controller-manager
-    kubeconfig: "{{ kubeconfig }}"
-  register: operator_pods
-  until:
-    - operator_pods.resources | length > 0
-    - operator_pods.resources[0].status.phase == "Running"
-  retries: 24
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Ready pod
+    -l control-plane=controller-manager
+    -n {{ awx_namespace }} --timeout=300s
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  register: operator_ready
+  changed_when: false
+  retries: 30
   delay: 10
+  until: operator_ready.rc == 0
 
 - name: Create AWX admin secret
   kubernetes.core.k8s:
@@ -75,10 +74,48 @@
     state: present
     kubeconfig: "{{ kubeconfig }}"
 
+- name: Wait for AWX reconciliation to complete
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Successful
+    awx/{{ awx_instance_name }}
+    -n {{ awx_namespace }} --timeout=1200s
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  changed_when: false
+
+- name: Wait for AWX deployments to be available
+  ansible.builtin.command: >-
+    kubectl rollout status deployment/{{ item }}
+    -n {{ awx_namespace }} --timeout=300s
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  loop:
+    - "{{ awx_instance_name }}-web"
+    - "{{ awx_instance_name }}-task"
+  changed_when: false
+
+- name: Wait for PostgreSQL to be available
+  ansible.builtin.command: >-
+    kubectl rollout status statefulset/{{ awx_postgres_host }}
+    -n {{ awx_namespace }} --timeout=300s
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  changed_when: false
+
+- name: Verify the AWX API
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ awx_nodeport }}/api/v2/ping/"
+    return_content: true
+    status_code: 200
+  register: awx_ping
+  retries: 20
+  delay: 15
+  until: awx_ping.status | default(0) == 200
+
 - name: Show post-install info
   ansible.builtin.debug:
     msg:
-      - "AWX deployment started. Watch: kubectl get pods -n {{ awx_namespace }} -w"
-      - "URL:   http://<host-ip>:{{ awx_nodeport }}"
+      - "AWX {{ awx_ping.json.version }} is ready."
+      - "URL:   http://{{ ansible_facts['default_ipv4']['address'] }}:{{ awx_nodeport }}"
       - "Login: {{ awx_admin_user }}"
       - "Password: (value from AWX_ADMIN_PASSWORD in .env)"

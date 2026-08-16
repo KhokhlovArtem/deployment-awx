@@ -9,12 +9,16 @@ bash scripts/bootstrap.sh
 source ~/ansible-venv/bin/activate
 ```
 
+The host must be Ubuntu 24.04 LTS x86-64 with Python 3.12 or newer, at least
+4 vCPU, 8 GB RAM, a 50 GB disk, and 25 GiB free on `/`. The playbook checks
+these values before installing k3s.
+
 ## Manual setup
 
 ### 1. System packages
 ```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3 python3-pip python3-venv git curl
+sudo apt-get update
+sudo apt-get install -y ca-certificates python3 python3-pip python3-venv git curl
 ```
 
 ### 2. Python virtualenv for Ansible
@@ -22,7 +26,7 @@ sudo apt install -y python3 python3-pip python3-venv git curl
 python3 -m venv ~/ansible-venv
 source ~/ansible-venv/bin/activate
 pip install --upgrade pip
-pip install ansible kubernetes PyYAML
+pip install -r requirements.txt
 ansible --version
 ```
 
@@ -32,11 +36,13 @@ ansible-galaxy collection install -r requirements.yml
 ```
 
 ### 4. Run the playbook
-Always activate the venv first, then export `.env` and run:
+Create `.env`, then use the install wrapper to load it and run Ansible with a
+UTF-8 locale:
 ```bash
-cp env.example .env        # edit passwords
-set -a && source .env && set +a
-ansible-playbook playbooks/install.yml -K
+cp .env.example .env
+chmod 600 .env
+$EDITOR .env
+scripts/install.sh -K
 ```
 
 To leave the virtualenv when finished:

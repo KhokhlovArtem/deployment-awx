@@ -16,15 +16,20 @@ kubectl describe awx awx -n awx
 - Check the node IP and that `AWX_NODEPORT` (default 30080) is open in the firewall.
 
 ## Re-run / update
-Idempotent. Change values in `.env`, re-source it, then:
+For non-secret configuration changes, re-run:
 ```bash
-ansible-playbook playbooks/install.yml -K
+scripts/install.sh -K
 ```
 
-## Full teardown
+Do not rotate the managed PostgreSQL password by changing `.env` alone.
+
+## Remove AWX
 ```bash
-ansible-playbook playbooks/uninstall.yml
+scripts/uninstall.sh
 ```
+
+This removes AWX and its namespace. It leaves k3s, the virtualenv, kubeconfig,
+the rendered install files, and cluster-scoped operator resources in place.
 
 ## ImagePullBackOff on kube-rbac-proxy
 The operator's upstream manifest references
