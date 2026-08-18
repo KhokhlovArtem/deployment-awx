@@ -68,6 +68,82 @@
         type: "{{ awx_postgres_type }}"
   no_log: true
 
+- name: Inspect custom Receptor CA files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ awx_receptor_ca_cert_path }}"
+    - "{{ awx_receptor_ca_key_path }}"
+  register: awx_receptor_ca_files
+  when: awx_receptor_ca_generation | length > 0
+  no_log: true
+
+- name: Validate custom Receptor CA files
+  ansible.builtin.assert:
+    that:
+      - awx_receptor_ca_files.results[0].stat.isreg | default(false)
+      - awx_receptor_ca_files.results[1].stat.isreg | default(false)
+      - awx_receptor_ca_files.results[1].stat.mode in ['0400', '0600']
+    fail_msg: >-
+      The Receptor CA certificate and private key must be regular files, and
+      the private key mode must be 0400 or 0600.
+  when: awx_receptor_ca_generation | length > 0
+  no_log: true
+
+- name: Inspect custom Receptor CA certificate
+  ansible.builtin.command:
+    argv: "{{ ['openssl', 'x509', '-in', awx_receptor_ca_cert_path, '-noout'] + item }}"
+  loop:
+    - ['-checkend', '2592000']
+    - ['-ext', 'basicConstraints']
+    - ['-ext', 'keyUsage']
+  register: awx_receptor_ca_certificate_checks
+  changed_when: false
+  when: awx_receptor_ca_generation | length > 0
+  no_log: true
+
+- name: Inspect custom Receptor CA public keys
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  loop:
+    - ['openssl', 'x509', '-in', "{{ awx_receptor_ca_cert_path }}", '-pubkey', '-noout']
+    - ['openssl', 'pkey', '-in', "{{ awx_receptor_ca_key_path }}", '-pubout']
+    - ['openssl', 'pkey', '-in', "{{ awx_receptor_ca_key_path }}", '-check', '-noout']
+  register: awx_receptor_ca_key_checks
+  changed_when: false
+  when: awx_receptor_ca_generation | length > 0
+  no_log: true
+
+- name: Validate custom Receptor CA properties
+  ansible.builtin.assert:
+    that:
+      - "'CA:TRUE' in awx_receptor_ca_certificate_checks.results[1].stdout"
+      - "'Certificate Sign' in awx_receptor_ca_certificate_checks.results[2].stdout"
+      - awx_receptor_ca_key_checks.results[0].stdout == awx_receptor_ca_key_checks.results[1].stdout
+    fail_msg: >-
+      The Receptor CA must be valid for at least 30 days, have CA signing
+      constraints, and match the supplied private key.
+  when: awx_receptor_ca_generation | length > 0
+  no_log: true
+
+- name: Create custom Receptor CA secret
+  kubernetes.core.k8s:
+    state: present
+    apply: true
+    kubeconfig: "{{ kubeconfig }}"
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ awx_receptor_ca_secret_name }}"
+        namespace: "{{ awx_namespace }}"
+      type: kubernetes.io/tls
+      stringData:
+        tls.crt: "{{ lookup('file', awx_receptor_ca_cert_path) }}"
+        tls.key: "{{ lookup('file', awx_receptor_ca_key_path) }}"
+  when: awx_receptor_ca_generation | length > 0
+  no_log: true
+
 - name: Deploy AWX custom resource
   kubernetes.core.k8s:
     definition: "{{ lookup('template', 'awx-cr.yaml.j2') | from_yaml }}"

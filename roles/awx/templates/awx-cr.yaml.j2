@@ -15,3 +15,7 @@ spec:
   ee_extra_env: |
     - name: RES_OPTIONS
       value: ndots:1
+{% if awx_receptor_ca_generation | length > 0 %}
+  task_annotations: |
+    receptor-ca-generation: "{{ awx_receptor_ca_generation }}"
+{% endif %}

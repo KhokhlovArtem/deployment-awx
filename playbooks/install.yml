@@ -16,6 +16,9 @@
     awx_admin_user: "{{ lookup('env', 'AWX_ADMIN_USER') | default('admin', true) }}"
     awx_admin_password: "{{ lookup('env', 'AWX_ADMIN_PASSWORD') }}"
     awx_postgres_password: "{{ lookup('env', 'AWX_POSTGRES_PASSWORD') }}"
+    awx_receptor_ca_cert_path: "{{ lookup('env', 'AWX_RECEPTOR_CA_CERT_PATH') }}"
+    awx_receptor_ca_key_path: "{{ lookup('env', 'AWX_RECEPTOR_CA_KEY_PATH') }}"
+    awx_receptor_ca_generation: "{{ lookup('env', 'AWX_RECEPTOR_CA_GENERATION') }}"
     kube_rbac_proxy_image: "{{ lookup('env', 'KUBE_RBAC_PROXY_IMAGE') | default('quay.io/brancz/kube-rbac-proxy', true) }}"
     kube_rbac_proxy_version: "{{ lookup('env', 'KUBE_RBAC_PROXY_VERSION') | default('v0.15.0', true) }}"
 
@@ -56,10 +59,19 @@
           - awx_postgres_password | length >= 16
           - awx_admin_password not in ['change-me-strong', 'change-me']
           - awx_postgres_password not in ['change-me-db-strong', 'change-me']
+          - >-
+            (awx_receptor_ca_cert_path | length == 0 and
+             awx_receptor_ca_key_path | length == 0 and
+             awx_receptor_ca_generation | length == 0) or
+            (awx_receptor_ca_cert_path | length > 0 and
+             awx_receptor_ca_key_path | length > 0 and
+             awx_receptor_ca_generation | length > 0)
         fail_msg: >-
           K3S_VERSION must be an exact release such as v1.36.3+k3s1,
           AWX_NODEPORT must be between 30000 and 32767, and both passwords
           must be non-example values containing at least 16 characters.
+          Receptor CA certificate path, key path, and generation must either
+          all be set or all be empty.
 
     - name: Verify required upstream services are reachable
       ansible.builtin.uri:

@@ -7,6 +7,10 @@ awx_instance_name: awx
 
 awx_admin_secret_name: awx-admin-secret
 awx_postgres_secret_name: awx-postgres-configuration
+awx_receptor_ca_secret_name: "{{ awx_instance_name }}-receptor-ca"
+awx_receptor_ca_cert_path: ""
+awx_receptor_ca_key_path: ""
+awx_receptor_ca_generation: ""
 
 awx_postgres_host: awx-postgres-15
 awx_postgres_port: 5432

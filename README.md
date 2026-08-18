@@ -73,8 +73,15 @@ All settings come from environment variables loaded from `.env` by
 | `AWX_ADMIN_USER` | `admin` | AWX admin user |
 | `AWX_ADMIN_PASSWORD` | — (required) | AWX admin password |
 | `AWX_POSTGRES_PASSWORD` | — (required) | PostgreSQL password |
+| `AWX_RECEPTOR_CA_CERT_PATH` | — | optional trusted local Receptor CA certificate path |
+| `AWX_RECEPTOR_CA_KEY_PATH` | — | optional local Receptor CA private key path (mode `0400` or `0600`) |
+| `AWX_RECEPTOR_CA_GENERATION` | — | rollout marker required with custom Receptor CA paths |
 
 > `.env` is gitignored. Keep it mode `0600` and never commit real passwords.
+
+> Keep Receptor CA PEM files outside Git. Set all three Receptor CA variables
+> together to manage the `awx-receptor-ca` Secret declaratively and roll the
+> task pod when the generation value changes.
 
 > The `kubernetes.core.*` modules use the interpreter at `~/ansible-venv/bin/python3`
 > (pinned via `ansible_python_interpreter`). Keep `kubernetes` + `PyYAML` in that venv
