@@ -58,8 +58,28 @@ class InputTests(unittest.TestCase):
             environment.assert_not_called()
             run.assert_not_called()
 
+    def test_profile_rejects_mixed_connection_options(self):
+        with patch.object(c.sys, 'platform', 'linux'), patch.object(c.sys, 'version_info', (3, 12)), \
+                patch.object(c, 'environment') as environment:
+            for options in (['--ssh-profile', '--host', 'server'],
+                            ['--ssh-profile', '--identity', '/project/identity'],
+                            ['--agent-socket-file', 'temp/socket.txt']):
+                with self.assertRaises(SystemExit):
+                    c.main(['install'] + options)
+            environment.assert_not_called()
+
 
 class RuntimeTests(unittest.TestCase):
+    def test_runtime_subdirectory_and_boundary(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / 'temp') as directory, \
+                patch.object(c, 'ROOT', Path(directory)):
+            env = c.environment('temp/r')
+            self.assertEqual(Path(env['TMPDIR']), Path(directory) / 'temp/r')
+            self.assertTrue(Path(env['ANSIBLE_LOCAL_TEMP']).is_relative_to(Path(env['TMPDIR'])))
+            for value in ('/tmp', '../temp', 'temp/../outside', '.venv'):
+                with self.assertRaises(ValueError):
+                    c.environment(value)
+
     def test_runtime_environment_is_local_and_filtered(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'temp') as directory, \
                 patch.object(c, 'ROOT', Path(directory)), \

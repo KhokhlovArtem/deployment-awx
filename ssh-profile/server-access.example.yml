@@ -1,0 +1,18 @@
+---
+# Illustrative only. Use the verified export command to create a real profile.
+version: 1
+server:
+  name: test-server
+  host: 192.0.2.10
+  port: 22
+ssh:
+  user: admakh
+  authentication:
+    method: agent
+    key_fingerprint: "SHA256:REPLACE_WITH_PERSONAL_KEY_FINGERPRINT"
+  verification:
+    policy: strict
+    host_public_key: "ssh-ed25519 REPLACE_WITH_TRUSTED_SERVER_PUBLIC_KEY"
+privileges:
+  method: sudo
+  password_required: false

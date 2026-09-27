@@ -1,0 +1,11 @@
+# This file travels with the folder and protects the real local profile.
+*.local.yml
+*.local.yaml
+.env
+.env.*
+*.pem
+*.key
+temp/
+.venv/
+__pycache__/
+*.pyc

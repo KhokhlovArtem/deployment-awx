@@ -2,6 +2,7 @@
 """Project-local controller. Never loads dotenv or reads SSH private keys."""
 import argparse
 import getpass
+import importlib.util
 import ipaddress
 import json
 import os
@@ -86,6 +87,9 @@ def parser():
     p.add_argument('--user', type=identifier)
     p.add_argument('--port', type=port, default=22)
     p.add_argument('--identity', type=key_path)
+    p.add_argument('--ssh-profile', action='store_true', help='Use the project ssh-profile bundle instead of explicit SSH parameters')
+    p.add_argument('--agent-socket-file', help='Project-local socket reference for ssh-profile')
+    p.add_argument('--runtime-dir', default='temp', help='Runtime directory under project temp (e.g. temp/r mounted as tmpfs)')
     p.add_argument('--namespace', type=namespace, default='awx')
     p.add_argument('--nodeport', type=port, default=30080)
     p.add_argument('--public-url', type=public_url)
@@ -107,18 +111,21 @@ def local_dir(relative):
     return path
 
 
-def environment():
+def environment(runtime_dir='temp'):
+    runtime = Path(runtime_dir)
+    if runtime.is_absolute() or not runtime.parts or runtime.parts[0] != 'temp' or '..' in runtime.parts:
+        raise ValueError('Runtime directory must be inside project temp/')
     # Deliberate allowlist: inherited Ansible configuration/callbacks cannot log secrets.
     env = {name: os.getenv(name) for name in ('PATH', 'HOME', 'USER', 'SSH_AUTH_SOCK', 'TERM')
            if os.getenv(name) is not None}
-    temp = str(local_dir('temp'))
+    temp = str(local_dir(runtime_dir))
     env.update(TMP=temp, TEMP=temp, TMPDIR=temp, LANG='C.UTF-8', LC_ALL='C.UTF-8',
                ANSIBLE_CONFIG=str(ROOT / 'ansible.cfg'),
                ANSIBLE_COLLECTIONS_PATH=str(local_dir('.ansible/collections')),
-               ANSIBLE_LOCAL_TEMP=str(local_dir('temp/ansible')),
+               ANSIBLE_LOCAL_TEMP=str(local_dir(str(runtime / 'ansible'))),
                ANSIBLE_HOME=str(local_dir('.ansible')),
-               XDG_CACHE_HOME=str(local_dir('temp/cache')),
-               PIP_CACHE_DIR=str(local_dir('temp/pip')),
+               XDG_CACHE_HOME=str(local_dir(str(runtime / 'cache'))),
+               PIP_CACHE_DIR=str(local_dir(str(runtime / 'pip'))),
                PIP_CONFIG_FILE='/dev/null',
                ANSIBLE_HOST_KEY_CHECKING='True', ANSIBLE_DISPLAY_ARGS_TO_STDOUT='False',
                ANSIBLE_DIFF_ALWAYS='False', ANSIBLE_NOCOLOR='1')
@@ -186,7 +193,11 @@ def main(argv=None):
     args = p.parse_args(argv)
     if sys.platform != 'linux' or sys.version_info < (3, 12):
         p.error('Run under WSL Ubuntu with Python 3.12+')
-    if args.mode != 'bootstrap' and (not args.host or not args.user):
+    if args.ssh_profile and (args.host or args.user or args.identity or args.port != 22):
+        p.error('--ssh-profile cannot be combined with explicit SSH parameters')
+    if args.agent_socket_file and not args.ssh_profile:
+        p.error('--agent-socket-file requires --ssh-profile')
+    if args.mode != 'bootstrap' and not args.ssh_profile and (not args.host or not args.user):
         p.error('--host and --user are required')
     if not 30000 <= args.nodeport <= 32767:
         p.error('--nodeport must be 30000..32767')
@@ -195,7 +206,7 @@ def main(argv=None):
     for name in ('AWX_RECEPTOR_CA_CERT_PATH', 'AWX_RECEPTOR_CA_KEY_PATH', 'AWX_RECEPTOR_CA_GENERATION'):
         if os.getenv(name):
             p.error('Custom Receptor CA is not supported by this entry point; unset ' + name)
-    env = environment()
+    env = environment(args.runtime_dir)
     venv = local_dir('.venv')
     if args.mode == 'bootstrap':
         run([sys.executable, '-m', 'venv', venv], env)
@@ -210,8 +221,31 @@ def main(argv=None):
     if args.mode == 'install':
         collect_secrets(env)
     with tempfile.TemporaryDirectory(prefix='awx-', dir=env['TMPDIR']) as directory:
+        if args.ssh_profile:
+            bundle = ROOT / 'ssh-profile' / 'server_access.py'
+            if not bundle.resolve().is_relative_to(ROOT):
+                raise ValueError('SSH profile bundle escapes project')
+            spec = importlib.util.spec_from_file_location('awx_server_access', bundle)
+            access = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(access)
+            try:
+                workspace = access.Workspace(ROOT)
+                profile = workspace.load_profile('ssh-profile/server-access.local.yml')
+                ssh_env = access.runtime_environment(workspace, args.agent_socket_file)
+                env['SSH_AUTH_SOCK'] = ssh_env['SSH_AUTH_SOCK']
+                generated = access.generate_ansible(workspace, profile, Path(directory) / 'ssh', env)
+                deployment_inventory = {'awx': generated['all']}
+                deployment_inventory['awx']['vars'] = {
+                    'awx_namespace': args.namespace, 'awx_nodeport': args.nodeport,
+                    'awx_delete_confirmed': args.confirm_delete == args.namespace,
+                }
+                args.host = profile['server']['host']
+            except access.AccessError as error:
+                raise ValueError(str(error)) from None
+        else:
+            deployment_inventory = inventory(args)
         inv = Path(directory) / 'inventory.json'
-        inv.write_text(json.dumps(inventory(args)), encoding='utf-8')
+        inv.write_text(json.dumps(deployment_inventory), encoding='utf-8')
         command = [executable, '-i', inv, ROOT / 'playbooks' / (args.mode + '.yml')]
         if args.ask_become_pass:
             command.append('--ask-become-pass')
