@@ -15,3 +15,8 @@ k3s.yaml
 ansible-venv/
 .venv/
 __pycache__/
+temp/
+.ansible/
+.env.*
+*.pem
+*.key

@@ -1,42 +1,40 @@
 ---
-- name: Deploy AWX on k3s
+- name: Prepare clean Ubuntu target
   hosts: awx
-  gather_facts: true
-
+  gather_facts: false
+  become: true
   vars:
-    installer_home: "{{ lookup('env', 'HOME') }}"
-    ansible_python_interpreter: "{{ installer_home }}/ansible-venv/bin/python3"
-    kubeconfig: "{{ installer_home }}/.kube/config"
-    awx_install_dir: "{{ installer_home }}/awx-install"
-
-    k3s_version: "{{ lookup('env', 'K3S_VERSION') | default('v1.36.3+k3s1', true) }}"
-    awx_namespace: "{{ lookup('env', 'AWX_NAMESPACE') | default('awx', true) }}"
-    awx_operator_version: "{{ lookup('env', 'AWX_OPERATOR_VERSION') | default('2.19.1', true) }}"
-    awx_nodeport: "{{ lookup('env', 'AWX_NODEPORT') | default('30080', true) }}"
-    awx_admin_user: "{{ lookup('env', 'AWX_ADMIN_USER') | default('admin', true) }}"
-    awx_admin_password: "{{ lookup('env', 'AWX_ADMIN_PASSWORD') }}"
-    awx_postgres_password: "{{ lookup('env', 'AWX_POSTGRES_PASSWORD') }}"
-    awx_receptor_ca_cert_path: "{{ lookup('env', 'AWX_RECEPTOR_CA_CERT_PATH') }}"
-    awx_receptor_ca_key_path: "{{ lookup('env', 'AWX_RECEPTOR_CA_KEY_PATH') }}"
-    awx_receptor_ca_generation: "{{ lookup('env', 'AWX_RECEPTOR_CA_GENERATION') }}"
-    kube_rbac_proxy_image: "{{ lookup('env', 'KUBE_RBAC_PROXY_IMAGE') | default('quay.io/brancz/kube-rbac-proxy', true) }}"
-    kube_rbac_proxy_version: "{{ lookup('env', 'KUBE_RBAC_PROXY_VERSION') | default('v0.15.0', true) }}"
-
+    ansible_python_interpreter: /usr/bin/python3
   pre_tasks:
+    - name: Validate OS and architecture before installing any packages
+      ansible.builtin.raw: |
+        set -eu
+        . /etc/os-release
+        test "$ID" = ubuntu
+        test "$(uname -m)" = x86_64
+        dpkg --compare-versions "$VERSION_ID" ge 24.04
+      changed_when: false
+
+    - name: Bootstrap system Python if absent
+      ansible.builtin.raw: |
+        set -eu
+        if ! test -x /usr/bin/python3; then
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y python3
+          echo AWX_PYTHON_INSTALLED
+        fi
+      register: python_bootstrap
+      changed_when: "'AWX_PYTHON_INSTALLED' in python_bootstrap.stdout"
+
+    - name: Gather target facts
+      ansible.builtin.setup:
+
     - name: Check whether k3s is already installed
       ansible.builtin.stat:
         path: /usr/local/bin/k3s
       register: k3s_preflight
 
-    - name: Determine available space on the root filesystem
-      ansible.builtin.set_fact:
-        root_available_bytes: >-
-          {{ ansible_facts['mounts']
-             | selectattr('mount', 'equalto', '/')
-             | map(attribute='size_available')
-             | first }}
-
-    - name: Validate host resources
+    - name: Validate host resources before k3s installation
       ansible.builtin.assert:
         that:
           - ansible_facts['distribution'] == 'Ubuntu'
@@ -44,16 +42,48 @@
           - ansible_facts['architecture'] == 'x86_64'
           - ansible_facts['processor_vcpus'] | int >= 4
           - ansible_facts['memtotal_mb'] | int >= 7000
-          - k3s_preflight.stat.exists or (root_available_bytes | int >= 26843545600)
-        fail_msg: >-
-          The host must be Ubuntu 24.04 or newer on x86_64 with at least
-          4 vCPU, 7 GB RAM, and 25 GiB free on the root filesystem.
+          - >-
+            k3s_preflight.stat.exists or
+            (ansible_facts['mounts'] | selectattr('mount', 'equalto', '/') |
+             map(attribute='size_available') | first | int >= 26843545600)
+        fail_msg: Ubuntu 24.04+ x86_64, 4 vCPU, 7 GB usable RAM and 25 GiB free on / are required.
 
+  tasks:
+    - name: Install remote system prerequisites
+      ansible.builtin.apt:
+        name: [python3-venv, python3-pip, ca-certificates, curl, git, openssl]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Prepare remote Kubernetes module environment
+      ansible.builtin.pip:
+        name:
+          - kubernetes==36.0.3
+          - PyYAML==6.0.3
+        virtualenv: /opt/awx-deploy-venv
+        virtualenv_command: /usr/bin/python3 -m venv
+
+- name: Deploy AWX on remote k3s
+  hosts: awx
+  gather_facts: true
+  become: true
+  vars:
+    installer_home: "{{ ansible_facts['user_dir'] }}"
+    ansible_python_interpreter: /opt/awx-deploy-venv/bin/python3
+    kubeconfig: "{{ installer_home }}/.kube/config"
+    awx_install_dir: "{{ installer_home }}/awx-install"
+    k3s_version: v1.36.3+k3s1
+    awx_admin_password: "{{ lookup('env', 'AWX_ADMIN_PASSWORD') }}"
+    awx_postgres_password: "{{ lookup('env', 'AWX_POSTGRES_PASSWORD') }}"
+
+  pre_tasks:
     - name: Validate deployment settings and secrets
       ansible.builtin.assert:
         that:
           - awx_nodeport | int >= 30000
           - awx_nodeport | int <= 32767
+          - awx_namespace is match('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
           - k3s_version is match('^v[0-9]+\.[0-9]+\.[0-9]+\+k3s[0-9]+$')
           - awx_admin_password | length >= 16
           - awx_postgres_password | length >= 16
@@ -66,45 +96,9 @@
             (awx_receptor_ca_cert_path | length > 0 and
              awx_receptor_ca_key_path | length > 0 and
              awx_receptor_ca_generation | length > 0)
-        fail_msg: >-
-          K3S_VERSION must be an exact release such as v1.36.3+k3s1,
-          AWX_NODEPORT must be between 30000 and 32767, and both passwords
-          must be non-example values containing at least 16 characters.
-          Receptor CA certificate path, key path, and generation must either
-          all be set or all be empty.
+      no_log: true
 
-    - name: Verify required upstream services are reachable
-      ansible.builtin.uri:
-        url: "{{ item }}"
-        method: GET
-        return_content: false
-        status_code: 200
-        timeout: 20
-      loop:
-        - https://get.k3s.io
-        - https://github.com
-        - https://quay.io
-        - https://pypi.org
-        - https://galaxy.ansible.com
-      register: upstream_check
-      retries: 2
-      delay: 5
-      until: upstream_check is succeeded
-
-    - name: Verify kubernetes Python library is available
-      block:
-        - name: Import kubernetes module with the venv interpreter
-          ansible.builtin.command: "{{ ansible_python_interpreter }} -c 'import kubernetes'"
-          changed_when: false
-      rescue:
-        - name: Fail with install hint
-          ansible.builtin.fail:
-            msg: >
-              The 'kubernetes' Python library is missing for interpreter
-              {{ ansible_python_interpreter }}. Run scripts/bootstrap.sh, then
-              'source ~/ansible-venv/bin/activate' before re-running this playbook.
-
-    - name: Ensure AWX install dir exists
+    - name: Ensure remote AWX install directory exists
       ansible.builtin.file:
         path: "{{ awx_install_dir }}"
         state: directory

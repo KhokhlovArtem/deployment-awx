@@ -13,9 +13,15 @@
     dest: "{{ awx_install_dir }}/kustomization.yaml"
     mode: "0644"
 
+- name: Build AWX Operator manifests on the target
+  ansible.builtin.command:
+    argv: [kubectl, kustomize, "{{ awx_install_dir }}"]
+  register: awx_operator_manifests
+  changed_when: false
+
 - name: Apply AWX Operator via kustomize
   kubernetes.core.k8s:
-    definition: "{{ lookup('kubernetes.core.kustomize', dir=awx_install_dir) }}"
+    definition: "{{ awx_operator_manifests.stdout | from_yaml_all | list }}"
     state: present
     kubeconfig: "{{ kubeconfig }}"
 
@@ -32,6 +38,31 @@
   delay: 10
   until: operator_ready.rc == 0
 
+- name: Inspect existing credentials before any password update
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ item }}"
+    namespace: "{{ awx_namespace }}"
+    kubeconfig: "{{ kubeconfig }}"
+  loop:
+    - "{{ awx_admin_secret_name }}"
+    - "{{ awx_postgres_secret_name }}"
+  register: awx_existing_credentials
+  no_log: true
+
+- name: Refuse implicit password rotation on repeat deployment
+  ansible.builtin.assert:
+    that:
+      - >-
+        awx_existing_credentials.results[0].resources | length == 0 or
+        (awx_existing_credentials.results[0].resources[0].data.password | b64decode == awx_admin_password)
+      - >-
+        awx_existing_credentials.results[1].resources | length == 0 or
+        (awx_existing_credentials.results[1].resources[0].data.password | b64decode == awx_postgres_password)
+    fail_msg: Existing credentials differ. Supply the original passwords; rotation is a separate procedure.
+  no_log: true
+
 - name: Create AWX admin secret
   kubernetes.core.k8s:
     state: present
@@ -43,8 +74,8 @@
         name: "{{ awx_admin_secret_name }}"
         namespace: "{{ awx_namespace }}"
       type: Opaque
-      stringData:
-        password: "{{ awx_admin_password }}"
+      data:
+        password: "{{ awx_admin_password | b64encode }}"
   no_log: true
 
 - name: Create AWX postgres configuration secret
@@ -58,14 +89,14 @@
         name: "{{ awx_postgres_secret_name }}"
         namespace: "{{ awx_namespace }}"
       type: Opaque
-      stringData:
-        host: "{{ awx_postgres_host }}"
-        port: "{{ awx_postgres_port | string }}"
-        database: "{{ awx_postgres_database }}"
-        username: "{{ awx_postgres_username }}"
-        password: "{{ awx_postgres_password }}"
-        sslmode: "{{ awx_postgres_sslmode }}"
-        type: "{{ awx_postgres_type }}"
+      data:
+        host: "{{ awx_postgres_host | b64encode }}"
+        port: "{{ awx_postgres_port | string | b64encode }}"
+        database: "{{ awx_postgres_database | b64encode }}"
+        username: "{{ awx_postgres_username | b64encode }}"
+        password: "{{ awx_postgres_password | b64encode }}"
+        sslmode: "{{ awx_postgres_sslmode | b64encode }}"
+        type: "{{ awx_postgres_type | b64encode }}"
   no_log: true
 
 - name: Inspect custom Receptor CA files
@@ -126,6 +157,20 @@
   when: awx_receptor_ca_generation | length > 0
   no_log: true
 
+- name: Read validated Receptor CA certificate on the target
+  ansible.builtin.slurp:
+    src: "{{ awx_receptor_ca_cert_path }}"
+  register: awx_receptor_cert_content
+  when: awx_receptor_ca_generation | length > 0
+  no_log: true
+
+- name: Read validated Receptor CA key on the target
+  ansible.builtin.slurp:
+    src: "{{ awx_receptor_ca_key_path }}"
+  register: awx_receptor_key_content
+  when: awx_receptor_ca_generation | length > 0
+  no_log: true
+
 - name: Create custom Receptor CA secret
   kubernetes.core.k8s:
     state: present
@@ -139,8 +184,8 @@
         namespace: "{{ awx_namespace }}"
       type: kubernetes.io/tls
       stringData:
-        tls.crt: "{{ lookup('file', awx_receptor_ca_cert_path) }}"
-        tls.key: "{{ lookup('file', awx_receptor_ca_key_path) }}"
+        tls.crt: "{{ awx_receptor_cert_content.content | b64decode }}"
+        tls.key: "{{ awx_receptor_key_content.content | b64decode }}"
   when: awx_receptor_ca_generation | length > 0
   no_log: true
 
@@ -186,12 +231,17 @@
   register: awx_ping
   retries: 20
   delay: 15
-  until: awx_ping.status | default(0) == 200
+  until:
+    - awx_ping.status | default(0) == 200
+    - awx_ping.json is defined
+    - awx_ping.json.version is defined
+    - awx_ping.json.instances is defined
+    - awx_ping.json.instance_groups is defined
 
 - name: Show post-install info
   ansible.builtin.debug:
     msg:
       - "AWX {{ awx_ping.json.version }} is ready."
-      - "URL:   http://{{ ansible_facts['default_ipv4']['address'] }}:{{ awx_nodeport }}"
+      - "The controller will verify and print the external access URL."
       - "Login: {{ awx_admin_user }}"
-      - "Password: (value from AWX_ADMIN_PASSWORD in .env)"
+      - "Password: supplied through the controller environment or hidden prompt"

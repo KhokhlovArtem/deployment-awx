@@ -2,15 +2,22 @@
 - name: Uninstall AWX
   hosts: awx
   gather_facts: true
+  become: true
 
   vars:
-    installer_home: "{{ lookup('env', 'HOME') }}"
-    ansible_python_interpreter: "{{ installer_home }}/ansible-venv/bin/python3"
+    installer_home: "{{ ansible_facts['user_dir'] }}"
+    ansible_python_interpreter: /opt/awx-deploy-venv/bin/python3
     kubeconfig: "{{ installer_home }}/.kube/config"
-    awx_namespace: "{{ lookup('env', 'AWX_NAMESPACE') | default('awx', true) }}"
     awx_instance_name: awx
 
   tasks:
+    - name: Require explicit destructive deletion confirmation
+      ansible.builtin.assert:
+        that:
+          - awx_delete_confirmed | default(false) | bool
+          - awx_namespace is defined
+        fail_msg: Use the controller with --confirm-delete matching --namespace. This deletes PVCs.
+
     - name: Delete AWX custom resource
       kubernetes.core.k8s:
         api_version: awx.ansible.com/v1beta1
@@ -27,3 +34,5 @@
         name: "{{ awx_namespace }}"
         state: absent
         kubeconfig: "{{ kubeconfig }}"
+        wait: true
+        wait_timeout: 600

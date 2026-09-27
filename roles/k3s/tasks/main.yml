@@ -46,6 +46,7 @@
     owner: "{{ ansible_facts['user_id'] }}"
     mode: "0600"
   become: true
+  no_log: true
 
 - name: Wait for node to be Ready
   ansible.builtin.command: kubectl wait --for=condition=Ready node --all --timeout=120s
